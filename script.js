@@ -32,6 +32,9 @@
   const controls = {};
   let graph;
   let feedbackTimeoutId = null;
+  const audio = {
+    context: null
+  };
 
   window.addEventListener("DOMContentLoaded", () => {
     cacheControls();
@@ -95,6 +98,97 @@
     });
   }
 
+  function getAudioContext() {
+    if (audio.context) {
+      if (audio.context.state === "suspended") {
+        audio.context.resume().catch(() => {});
+      }
+      return audio.context;
+    }
+
+    const AudioContextCls = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCls) {
+      return null;
+    }
+
+    try {
+      audio.context = new AudioContextCls();
+      return audio.context;
+    } catch (error) {
+      console.warn("Audio context unavailable", error);
+      return null;
+    }
+  }
+
+  function playPopSound() {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(320, now);
+    osc.frequency.exponentialRampToValueAtTime(160, now + 0.12);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.3, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.2);
+    osc.onended = () => {
+      osc.disconnect();
+      gain.disconnect();
+    };
+  }
+
+  function playChimeSound() {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc1.type = "sine";
+    osc2.type = "sine";
+
+    osc1.frequency.setValueAtTime(880, now);
+    osc1.frequency.exponentialRampToValueAtTime(1320, now + 0.25);
+
+    osc2.frequency.setValueAtTime(660, now);
+    osc2.frequency.exponentialRampToValueAtTime(990, now + 0.22);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.25, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 0.4);
+    osc2.stop(now + 0.4);
+    let cleaned = false;
+    const finish = () => {
+      if (cleaned) return;
+      cleaned = true;
+      osc1.disconnect();
+      osc2.disconnect();
+      gain.disconnect();
+    };
+    osc1.onended = finish;
+    osc2.onended = finish;
+  }
+
   async function startWalk(seedInput) {
     try {
       const normalizedSeed = normalizeTitle(seedInput);
@@ -104,6 +198,7 @@
       }
 
       setFeedback("Preparing random walk...", "success");
+      getAudioContext();
       resetAll();
       state.seedId = normalizedSeed;
 
@@ -279,6 +374,7 @@
 
     if (isNew) {
       updateSimilarityEdges(node);
+      playPopSound();
     }
 
     state.previousTitle = prior;
@@ -402,6 +498,7 @@
       link = { source: sourceId, target: targetId, type: "similarity", weight: clamped };
       state.links.push(link);
       state.linkIndex.set(key, link);
+      playChimeSound();
     } else {
       link.weight = Math.max(link.weight, clamped);
     }

@@ -16,5 +16,6 @@ Interactive client-side visualiser that performs a random walk across Wikipedia.
 - Similarity links connect pages that share overlapping categories (top three matches per new page).
 - Walk links grow thicker as the same transition occurs multiple times.
 - The walk advances continuously without artificial delays—use **Pause** if you need to inspect the state.
+- Lightweight audio cues play for new pages (pop) and fresh similarity connections (chime).
 
 All requests are made directly from the browser; no backend server is required.
