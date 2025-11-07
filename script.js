@@ -53,6 +53,9 @@
     controls.stepCount = document.getElementById("step-count");
     controls.uniqueCount = document.getElementById("unique-count");
     controls.currentPage = document.getElementById("current-page");
+    controls.maxDistance = document.getElementById("max-distance");
+    controls.walkLinkCount = document.getElementById("walk-link-count");
+    controls.similarityCount = document.getElementById("similarity-count");
     controls.feedback = document.getElementById("feedback");
     controls.visitLog = document.getElementById("visit-log");
     controls.nodeScale = document.getElementById("node-scale");
@@ -656,6 +659,19 @@
     controls.uniqueCount.textContent = String(state.nodes.length);
     const currentNode = state.currentTitle ? state.nodeIndex.get(state.currentTitle) : null;
     controls.currentPage.textContent = currentNode ? currentNode.title : "–";
+    controls.maxDistance.textContent = String(state.maxFiniteDepth ?? 0);
+
+    let walkLinks = 0;
+    let similarityLinks = 0;
+    for (const link of state.links) {
+      if (link.type === "walk") {
+        walkLinks += 1;
+      } else if (link.type === "similarity") {
+        similarityLinks += 1;
+      }
+    }
+    controls.walkLinkCount.textContent = String(walkLinks);
+    controls.similarityCount.textContent = String(similarityLinks);
 
     controls.pauseBtn.disabled = !state.currentTitle;
     controls.resetBtn.disabled = !state.currentTitle && !state.nodes.length;

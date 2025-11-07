@@ -11,11 +11,6 @@ Interactive client-side visualiser that performs a random walk across Wikipedia.
 
 ## How It Works
 
-- Each step fetches a random internal link from the current page using the MediaWiki API.
-- Nodes represent visited pages; size grows with revisits while colour darkens (white → red → black) with the number of walk connections separating the page from the start.
-- Similarity links connect pages that share overlapping categories (top three matches per new page).
-- Walk links grow thicker as the same transition occurs multiple times.
-- The walk advances continuously without artificial delays—use **Pause** if you need to inspect the state.
-- Lightweight audio cues play for new pages (pop) and fresh similarity connections (chime).
+- Sidebar stats track furthest hop distance from the seed and counts of walk/similarity edges alongside step totals.
 
 All requests are made directly from the browser; no backend server is required.
