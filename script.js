@@ -18,11 +18,10 @@
     depths: new Map(),
     adjacency: new Map(),
     seedId: null,
-  maxFiniteDepth: 0,
-  nodeScale: 1,
+    maxFiniteDepth: 0,
+    nodeScale: 1,
     running: false,
-    timeoutId: null,
-    stepDelay: 2000,
+    loopPromise: null,
     stepCount: 0,
     currentTitle: null,
     previousTitle: null,
@@ -44,7 +43,6 @@
   function cacheControls() {
     controls.form = document.getElementById("start-form");
     controls.startInput = document.getElementById("start-title");
-    controls.delayInput = document.getElementById("step-delay");
     controls.startBtn = document.getElementById("start-btn");
     controls.pauseBtn = document.getElementById("pause-btn");
     controls.stepBtn = document.getElementById("step-btn");
@@ -107,13 +105,11 @@
 
       setFeedback("Preparing random walk...", "success");
       resetAll();
-      state.stepDelay = clampDelay(parseInt(controls.delayInput.value, 10));
-      controls.delayInput.value = String(state.stepDelay);
-  state.seedId = normalizedSeed;
+      state.seedId = normalizedSeed;
 
-      await visitPage(normalizedSeed, 0, { isSeed: true });
-      state.running = true;
-      scheduleNextStep(true);
+  await visitPage(normalizedSeed, 0, { isSeed: true });
+  state.running = true;
+  ensureLoopRunning();
       updateUI();
       setFeedback(`Walking from ${prettifyTitle(normalizedSeed)}.`, "success");
     } catch (error) {
@@ -123,20 +119,21 @@
     }
   }
 
-  function clampDelay(value) {
-    if (!Number.isFinite(value)) return 2000;
-    return Math.min(Math.max(value, 500), 10000);
+  function ensureLoopRunning() {
+    if (!state.running) return;
+    if (!state.loopPromise) {
+      state.loopPromise = stepLoop();
+    }
   }
 
-  function scheduleNextStep(immediate = false) {
-    if (!state.running) return;
-    clearTimeout(state.timeoutId);
-    state.timeoutId = setTimeout(async () => {
-      await performStep();
-      if (state.running) {
-        scheduleNextStep();
+  async function stepLoop() {
+    try {
+      while (state.running) {
+        await performStep();
       }
-    }, immediate ? 0 : state.stepDelay);
+    } finally {
+      state.loopPromise = null;
+    }
   }
 
   async function performStep(manual = false) {
@@ -228,8 +225,6 @@
 
   function pauseWalk() {
     if (!state.running) return;
-    clearTimeout(state.timeoutId);
-    state.timeoutId = null;
     state.running = false;
     updateUI();
     setFeedback("Walk paused.", "success");
@@ -240,30 +235,27 @@
     state.running = true;
     updateUI();
     setFeedback("Walk resumed.", "success");
-    scheduleNextStep(true);
+    ensureLoopRunning();
   }
 
   function stopRunning() {
-    clearTimeout(state.timeoutId);
-    state.timeoutId = null;
     state.running = false;
     updateUI();
   }
 
   function resetAll() {
-    clearTimeout(state.timeoutId);
-    state.timeoutId = null;
     state.running = false;
+    state.loopPromise = null;
     state.stepCount = 0;
     state.currentTitle = null;
     state.previousTitle = null;
     state.inFlight = false;
     state.visitHistory = [];
     state.walkStack = [];
-  state.depths = new Map();
-  state.adjacency = new Map();
-  state.seedId = null;
-  state.maxFiniteDepth = 0;
+    state.depths = new Map();
+    state.adjacency = new Map();
+    state.seedId = null;
+    state.maxFiniteDepth = 0;
     state.nodes.length = 0;
     state.links.length = 0;
     state.nodeIndex.clear();
@@ -457,6 +449,9 @@
   }
 
   function nodeColor(node) {
+    if (state.seedId && node?.id === state.seedId) {
+      return "#00ff66";
+    }
     const depth = Number.isFinite(node?.depth) ? node.depth : 0;
     return depthToColor(depth);
   }
@@ -915,7 +910,8 @@
 
     nodeRadius(node) {
       const base = 10 + Math.log2(node.visitCount + 1) * 6;
-      return base * (state.nodeScale || 1);
+      const multiplier = state.seedId && node.id === state.seedId ? 2 : 1;
+      return base * (state.nodeScale || 1) * multiplier;
     }
 
     nodeTooltip(node) {
