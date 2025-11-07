@@ -50,6 +50,24 @@ input[type="number"] {
   color: inherit;
 }
 
+.range-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.range-row input[type="range"] {
+  flex: 1;
+  accent-color: #60a5fa;
+}
+
+.range-row output {
+  min-width: 3ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #cbd5f5;
+}
+
 input[type="text"]:focus,
 input[type="number"]:focus {
   outline: 2px solid rgba(59, 130, 246, 0.6);

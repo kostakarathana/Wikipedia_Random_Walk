@@ -19,6 +19,7 @@
     adjacency: new Map(),
     seedId: null,
   maxFiniteDepth: 0,
+  nodeScale: 1,
     running: false,
     timeoutId: null,
     stepDelay: 2000,
@@ -53,6 +54,8 @@
     controls.currentPage = document.getElementById("current-page");
     controls.feedback = document.getElementById("feedback");
     controls.visitLog = document.getElementById("visit-log");
+    controls.nodeScale = document.getElementById("node-scale");
+    controls.nodeScaleDisplay = document.getElementById("node-scale-display");
   }
 
   function attachEvents() {
@@ -81,6 +84,16 @@
     controls.resetBtn.addEventListener("click", () => {
       resetAll();
       setFeedback("Walk reset.", "success");
+    });
+
+    controls.nodeScale?.addEventListener("input", (event) => {
+      const value = Number.parseFloat(event.target.value);
+      if (!Number.isFinite(value) || value <= 0) return;
+      state.nodeScale = value;
+      updateNodeScaleDisplay();
+      if (graph) {
+        graph.update(state.nodes, state.links);
+      }
     });
   }
 
@@ -400,6 +413,7 @@
     } else {
       link.weight = Math.max(link.weight, clamped);
     }
+    addAdjacencyEdge(sourceId, targetId);
   }
 
   function refreshDepths() {
@@ -556,6 +570,15 @@
     controls.stepBtn.disabled = state.running || !state.currentTitle;
     controls.pauseBtn.textContent = state.running ? "Pause" : "Resume";
     controls.startBtn.textContent = state.currentTitle ? "Restart" : "Start";
+
+    updateNodeScaleDisplay();
+  }
+
+  function updateNodeScaleDisplay() {
+    if (!controls.nodeScaleDisplay || !controls.nodeScale) return;
+    controls.nodeScale.value = String(state.nodeScale);
+    const display = state.nodeScale % 1 === 0 ? state.nodeScale.toFixed(0) : state.nodeScale.toFixed(1);
+    controls.nodeScaleDisplay.textContent = `${display.replace(/\.0$/, "")}×`;
   }
 
   function setFeedback(message, tone) {
@@ -891,7 +914,8 @@
     }
 
     nodeRadius(node) {
-      return 10 + Math.log2(node.visitCount + 1) * 6;
+      const base = 10 + Math.log2(node.visitCount + 1) * 6;
+      return base * (state.nodeScale || 1);
     }
 
     nodeTooltip(node) {
