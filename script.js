@@ -60,9 +60,36 @@
     controls.visitLog = document.getElementById("visit-log");
     controls.nodeScale = document.getElementById("node-scale");
     controls.nodeScaleDisplay = document.getElementById("node-scale-display");
+    controls.infoBtn = document.getElementById("info-btn");
+    controls.infoDialog = document.getElementById("info-dialog");
   }
 
   function attachEvents() {
+    if (controls.infoBtn && controls.infoDialog && typeof controls.infoDialog.showModal === "function") {
+      controls.infoBtn.addEventListener("click", () => {
+        if (!controls.infoDialog) return;
+        if (controls.infoDialog.open) {
+          controls.infoDialog.close();
+          return;
+        }
+        try {
+          controls.infoDialog.showModal();
+          controls.infoBtn.setAttribute("aria-expanded", "true");
+        } catch (error) {
+          console.warn("showModal unavailable", error);
+        }
+      });
+
+      controls.infoDialog.addEventListener("close", () => {
+        controls.infoBtn?.setAttribute("aria-expanded", "false");
+        controls.infoBtn?.focus({ preventScroll: true });
+      });
+
+      controls.infoDialog.addEventListener("cancel", () => {
+        controls.infoBtn?.setAttribute("aria-expanded", "false");
+      });
+    }
+
     controls.form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const value = controls.startInput.value.trim();

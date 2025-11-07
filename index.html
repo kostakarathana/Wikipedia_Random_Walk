@@ -12,6 +12,15 @@
   <div class="app">
     <aside class="controls">
       <h1>Wikipedia Random Walk</h1>
+      <button
+        type="button"
+        id="info-btn"
+        class="icon-button"
+        aria-haspopup="dialog"
+        aria-controls="info-dialog"
+        aria-expanded="false"
+        aria-label="Show technical details"
+      >ⓘ</button>
       <form id="start-form" autocomplete="off">
         <label for="start-title">Start Page</label>
         <input type="text" id="start-title" name="start" placeholder="e.g. Alan Turing" required />
@@ -53,5 +62,47 @@
       <div id="graph"></div>
     </main>
   </div>
+
+  <dialog id="info-dialog" class="info-dialog">
+    <form method="dialog">
+      <header>
+        <h2>How the random walk works</h2>
+      </header>
+      <div class="info-content">
+        <p>
+          Let the current Wikipedia page be a node <em>v</em>. Each step queries the MediaWiki API for the set of
+          internal links <em>L(v)</em> within namespace 0, excluding "List of" pages. The next node is drawn uniformly at
+          random from <em>L(v)</em> \ {parent(v)}. When a page is revisited, it is treated as the same node.
+        </p>
+        <p>
+          The walk edges are stored as an undirected multigraph <em>G_w</em> where weights count traversals. In parallel, each
+          node stores its category set <em>C(v)</em>. When a node is first seen, we compute the Jaccard similarity
+          <em>J(u, v) = |C(u) ∩ C(v)| / |C(u) ∪ C(v)|</em> against previous nodes, keeping the top three non-zero matches. These
+          produce similarity edges in <em>G_s</em> with weight <em>J(u, v)</em>. The union <em>G = (V, E_w ∪ E_s)</em> drives layout and
+          distance calculations.
+        </p>
+        <p>
+          Layout uses a force-directed system from D3: nodes experience a repulsive <em>1/r²</em> charged force, spring forces on
+          edges, and a collision radius to prevent overlap. The natural edge length for walk edges scales inversely with
+          √(weight), making frequently traversed connections tighter. Similarity edges use a longer base length (≈220px)
+          scaled by category overlap.
+        </p>
+        <p>
+          The minimum hop distance from the seed node is recomputed after each step via breadth-first search over <em>G</em>,
+          giving <em>d(v)</em>. Node colour is sampled from a white→red→black gradient using <em>d(v) / max₍finite₎ d</em>, and the seed
+          node is highlighted bright green at twice the radius of other nodes. Collision radius and label placement use the
+          scaled node radius.
+        </p>
+        <p>
+          Audio cues are synthesised with the Web Audio API. New nodes trigger a short sine-curve pop; new similarity edges
+          play a dual-oscillator chime. All sounds are envelope-shaped to avoid clipping.<br/>Controls update shared state and
+          trigger a lock-free async loop that continuously steps the walk while <em>state.running</em> is true.
+        </p>
+      </div>
+      <menu>
+        <button value="cancel" id="info-close-btn">Close</button>
+      </menu>
+    </form>
+  </dialog>
 </body>
 </html>
