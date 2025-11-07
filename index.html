@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wikipedia Random Walk Explorer</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://d3js.org/d3.v7.min.js" defer></script>
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="controls">
+      <h1>Wikipedia Random Walk</h1>
+      <form id="start-form" autocomplete="off">
+        <label for="start-title">Start Page</label>
+        <input type="text" id="start-title" name="start" placeholder="e.g. Alan Turing" required />
+        <label for="step-delay">Delay Between Steps (ms)</label>
+        <input type="number" id="step-delay" name="delay" min="500" max="10000" step="100" value="2000" />
+        <div class="button-row">
+          <button type="submit" id="start-btn">Start</button>
+          <button type="button" id="pause-btn" disabled>Pause</button>
+          <button type="button" id="step-btn" disabled>Step</button>
+          <button type="button" id="reset-btn" disabled>Reset</button>
+        </div>
+      </form>
+      <section class="status">
+        <div class="stat"><span class="label">Steps</span><span id="step-count">0</span></div>
+        <div class="stat"><span class="label">Unique pages</span><span id="unique-count">0</span></div>
+        <div class="stat"><span class="label">Current page</span><span id="current-page">–</span></div>
+      </section>
+      <div id="feedback" class="feedback" role="status" aria-live="polite"></div>
+      <section class="log">
+        <h2>Visited</h2>
+        <ol id="visit-log"></ol>
+      </section>
+      <section class="about">
+        <h2>About</h2>
+        <p>
+          Starts from a seed Wikipedia page and repeatedly follows a randomly selected internal link.
+          Node colour fades from white to deep red to black as the number of walk connections from the starting page increases.
+          Thicker walk links show frequently traversed connections.
+        </p>
+      </section>
+    </aside>
+    <main class="visualisation">
+      <div id="graph"></div>
+    </main>
+  </div>
+</body>
+</html>

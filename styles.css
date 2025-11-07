@@ -1,0 +1,216 @@
+:root {
+  color-scheme: light dark;
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background-color: #0f172a;
+  color: #e2e8f0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) 1fr;
+  min-height: 100vh;
+}
+
+.controls {
+  padding: 1.5rem;
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98));
+  border-right: 1px solid rgba(148, 163, 184, 0.2);
+  overflow-y: auto;
+}
+
+.controls h1 {
+  font-size: 1.5rem;
+  margin: 0 0 1rem;
+}
+
+label {
+  display: block;
+  margin-top: 0.75rem;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: #cbd5f5;
+}
+
+input[type="text"],
+input[type="number"] {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.6);
+  color: inherit;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus {
+  outline: 2px solid rgba(59, 130, 246, 0.6);
+  border-color: rgba(59, 130, 246, 0.6);
+}
+
+.button-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-top: 1.25rem;
+}
+
+button {
+  padding: 0.65rem 0.75rem;
+  border: none;
+  border-radius: 0.65rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: rgba(59, 130, 246, 0.25);
+  color: #e2e8f0;
+  transition: background 0.2s ease;
+}
+
+button:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.45);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.status {
+  margin-top: 1.5rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.95rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  padding-bottom: 0.45rem;
+}
+
+.stat .label {
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.feedback {
+  min-height: 1.25rem;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: #f9a8d4;
+}
+
+.feedback.success {
+  color: #bbf7d0;
+}
+
+.log {
+  margin-top: 1.75rem;
+}
+
+.log h2,
+.about h2 {
+  font-size: 1rem;
+  margin-bottom: 0.65rem;
+}
+
+#visit-log {
+  list-style: decimal;
+  padding-left: 1.25rem;
+  margin: 0;
+  display: grid;
+  gap: 0.35rem;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+#visit-log li a {
+  color: #60a5fa;
+  text-decoration: none;
+}
+
+#visit-log li a:hover {
+  text-decoration: underline;
+}
+
+#visit-log li .visit-meta {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+
+.about {
+  margin-top: 1.75rem;
+  font-size: 0.9rem;
+  color: #cbd5f5;
+}
+
+.visualisation {
+  position: relative;
+  background: radial-gradient(circle at top left, rgba(59, 130, 246, 0.1), transparent 55%),
+    #020617;
+}
+
+#graph {
+  position: absolute;
+  inset: 0;
+}
+
+svg {
+  width: 100%;
+  height: 100%;
+  font-family: inherit;
+}
+
+.links line {
+  stroke: rgba(148, 163, 184, 0.35);
+  stroke-width: 1px;
+}
+
+.links line.walk {
+  stroke: rgba(96, 165, 250, 0.6);
+}
+
+.links line.similarity {
+  stroke: rgba(16, 185, 129, 0.5);
+  stroke-dasharray: 3 4;
+}
+
+.nodes circle {
+  stroke: rgba(226, 232, 240, 0.9);
+  stroke-width: 1.2px;
+}
+
+.nodes circle.revisited {
+  stroke-width: 2px;
+}
+
+.labels text {
+  fill: rgba(226, 232, 240, 0.9);
+  font-size: 0.75rem;
+  pointer-events: none;
+  text-anchor: middle;
+}
+
+@media (max-width: 960px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+
+  .controls {
+    border-right: none;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  }
+}
