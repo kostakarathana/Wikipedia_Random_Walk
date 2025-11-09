@@ -20,13 +20,16 @@
     seedId: null,
     maxFiniteDepth: 0,
     nodeScale: 1,
+    selectedNode: null,
+    pathToSeed: new Set(),
     running: false,
     loopPromise: null,
     stepCount: 0,
     currentTitle: null,
     previousTitle: null,
     inFlight: false,
-    visitHistory: []
+    visitHistory: [],
+    renderLogPending: false
   };
 
   const controls = {};
@@ -62,6 +65,7 @@
     controls.nodeScaleDisplay = document.getElementById("node-scale-display");
     controls.infoBtn = document.getElementById("info-btn");
     controls.infoDialog = document.getElementById("info-dialog");
+    controls.reorganiseBtn = document.getElementById("reorganise-btn");
   }
 
   function attachEvents() {
@@ -126,6 +130,30 @@
         graph.update(state.nodes, state.links);
       }
     });
+
+    controls.reorganiseBtn?.addEventListener("click", () => {
+      reorganiseGraph();
+    });
+  }
+
+  function reorganiseGraph() {
+    const wasRunning = state.running;
+    if (wasRunning) {
+      pauseWalk();
+    }
+
+    setFeedback("Reorganising graph layout...", "success");
+    
+    if (graph) {
+      graph.reorganise();
+    }
+
+    setTimeout(() => {
+      setFeedback("Graph reorganised.", "success");
+      if (wasRunning) {
+        resumeWalk();
+      }
+    }, 100);
   }
 
   function getAudioContext() {
@@ -355,6 +383,62 @@
     setFeedback("Walk paused.", "success");
   }
 
+  function handleNodeClick(event, node) {
+    event.stopPropagation();
+
+    // If clicking the same node, deselect it
+    if (state.selectedNode === node.id) {
+      state.selectedNode = null;
+      state.pathToSeed.clear();
+      setFeedback("Selection cleared.", "success");
+    } else {
+      // Select new node and compute path to seed
+      state.selectedNode = node.id;
+      const path = findShortestPathToSeed(node.id);
+      
+      if (path) {
+        state.pathToSeed = new Set(path);
+        setFeedback(`Showing path from ${node.title} to seed (${path.length} nodes).`, "success");
+      } else {
+        state.pathToSeed.clear();
+        setFeedback(`No path found from ${node.title} to seed.`, "warning");
+      }
+    }
+
+    if (graph) {
+      graph.update(state.nodes, state.links);
+    }
+  }
+
+  function findShortestPathToSeed(startId) {
+    if (!state.seedId || startId === state.seedId) {
+      return [startId];
+    }
+
+    // BFS to find shortest path
+    const queue = [[startId]];
+    const visited = new Set([startId]);
+
+    while (queue.length > 0) {
+      const path = queue.shift();
+      const current = path[path.length - 1];
+
+      if (current === state.seedId) {
+        return path;
+      }
+
+      const neighbors = state.adjacency.get(current) || new Set();
+      for (const neighbor of neighbors) {
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor);
+          queue.push([...path, neighbor]);
+        }
+      }
+    }
+
+    return null; // No path found
+  }
+
   function resumeWalk() {
     if (state.running || !state.currentTitle) return;
     state.running = true;
@@ -381,6 +465,8 @@
     state.adjacency = new Map();
     state.seedId = null;
     state.maxFiniteDepth = 0;
+    state.selectedNode = null;
+    state.pathToSeed.clear();
     state.nodes.length = 0;
     state.links.length = 0;
     state.nodeIndex.clear();
@@ -414,8 +500,13 @@
     refreshDepths();
 
     recordVisit(node, stepNumber);
-    graph.update(state.nodes, state.links);
-    updateUI();
+    
+    // Defer expensive operations
+    requestAnimationFrame(() => {
+      graph.update(state.nodes, state.links);
+      updateUI();
+    });
+    
     return node;
   }
 
@@ -505,18 +596,24 @@
   function updateSimilarityEdges(node) {
     if (!node.categorySet.size) return;
 
-    const candidates = state.nodes
-      .filter((other) => other.id !== node.id && other.categorySet.size)
-      .map((other) => ({
-        node: other,
-        similarity: jaccard(node.categorySet, other.categorySet)
-      }))
-      .filter((entry) => entry.similarity > 0)
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, SIMILARITY_NEIGHBORS);
+    // Optimize by computing similarities only for nodes with categories
+    const candidates = [];
+    for (let i = 0; i < state.nodes.length; i++) {
+      const other = state.nodes[i];
+      if (other.id === node.id || !other.categorySet.size) continue;
+      
+      const similarity = jaccard(node.categorySet, other.categorySet);
+      if (similarity > 0) {
+        candidates.push({ node: other, similarity });
+      }
+    }
+    
+    // Partial sort - only sort enough to get top SIMILARITY_NEIGHBORS
+    candidates.sort((a, b) => b.similarity - a.similarity);
+    const topCandidates = candidates.slice(0, SIMILARITY_NEIGHBORS);
 
-    for (const entry of candidates) {
-      upsertSimilarityLink(node.id, entry.node.id, entry.similarity);
+    for (let i = 0; i < topCandidates.length; i++) {
+      upsertSimilarityLink(node.id, topCandidates[i].node.id, topCandidates[i].similarity);
     }
   }
 
@@ -541,94 +638,92 @@
     }
 
     const depths = new Map();
-    const queue = [];
+    const queue = [state.seedId];
+    let head = 0;
 
     depths.set(state.seedId, 0);
-    queue.push(state.seedId);
 
-    while (queue.length) {
-      const current = queue.shift();
-      const currentDepth = depths.get(current) ?? 0;
+    while (head < queue.length) {
+      const current = queue[head++];
+      const currentDepth = depths.get(current);
       const neighbors = state.adjacency.get(current);
       if (!neighbors) continue;
 
-      neighbors.forEach((neighbor) => {
+      for (const neighbor of neighbors) {
         if (!depths.has(neighbor)) {
           depths.set(neighbor, currentDepth + 1);
           queue.push(neighbor);
         }
-      });
+      }
     }
 
-    state.nodes.forEach((node) => {
+    let maxFiniteDepth = 0;
+    for (let i = 0; i < state.nodes.length; i++) {
+      const node = state.nodes[i];
       const depth = depths.has(node.id) ? depths.get(node.id) : Infinity;
       node.depth = depth;
-      if (!depths.has(node.id)) {
-        depths.set(node.id, depth);
+      if (Number.isFinite(depth) && depth > maxFiniteDepth) {
+        maxFiniteDepth = depth;
       }
-    });
+    }
 
     state.depths = depths;
-    state.maxFiniteDepth = Array.from(depths.values()).reduce((max, value) => {
-      if (!Number.isFinite(value)) return max;
-      return value > max ? value : max;
-    }, 0);
+    state.maxFiniteDepth = maxFiniteDepth;
   }
 
   function nodeColor(node) {
     if (state.seedId && node?.id === state.seedId) {
       return "#00ff66";
     }
+
+    // If a node is selected, highlight path in yellow and grey out others
+    if (state.selectedNode) {
+      if (state.pathToSeed.has(node?.id)) {
+        return "#fbbf24"; // Yellow for path nodes
+      } else {
+        return "rgba(100, 100, 100, 0.2)"; // Grey with 80% transparency
+      }
+    }
+
     const depth = Number.isFinite(node?.depth) ? node.depth : 0;
     return depthToColor(depth);
   }
 
   function depthToColor(depth) {
-    if (!DEPTH_COLOR_STOPS.length) {
-      return "#ffffff";
-    }
-
     if (!Number.isFinite(depth)) {
-      const lastStop = DEPTH_COLOR_STOPS[DEPTH_COLOR_STOPS.length - 1];
-      return rgbToHex(...lastStop.rgb);
+      return "#000000";
     }
 
     const denominator = Math.max(state.maxFiniteDepth, 1);
     if (denominator <= 0) {
-      return rgbToHex(...DEPTH_COLOR_STOPS[0].rgb);
+      return "#ffffff";
     }
 
     const ratio = Math.min(1, Math.max(0, depth / denominator));
-    return interpolateStopColor(ratio);
+    return interpolateGradientColor(ratio);
   }
 
-  function interpolateStopColor(t) {
-    if (t <= DEPTH_COLOR_STOPS[0].position) {
-      return rgbToHex(...DEPTH_COLOR_STOPS[0].rgb);
+  function interpolateGradientColor(t) {
+    // White -> Red -> Black gradient
+    const white = [255, 255, 255];
+    const red = [185, 28, 28];
+    const black = [0, 0, 0];
+
+    let r, g, b;
+    if (t <= 0.6) {
+      // Interpolate from white to red
+      const localT = t / 0.6;
+      r = Math.round(white[0] + (red[0] - white[0]) * localT);
+      g = Math.round(white[1] + (red[1] - white[1]) * localT);
+      b = Math.round(white[2] + (red[2] - white[2]) * localT);
+    } else {
+      // Interpolate from red to black
+      const localT = (t - 0.6) / 0.4;
+      r = Math.round(red[0] + (black[0] - red[0]) * localT);
+      g = Math.round(red[1] + (black[1] - red[1]) * localT);
+      b = Math.round(red[2] + (black[2] - red[2]) * localT);
     }
 
-    const lastStop = DEPTH_COLOR_STOPS[DEPTH_COLOR_STOPS.length - 1];
-    if (t >= lastStop.position) {
-      return rgbToHex(...lastStop.rgb);
-    }
-
-    let left = DEPTH_COLOR_STOPS[0];
-    let right = lastStop;
-    for (let i = 0; i < DEPTH_COLOR_STOPS.length - 1; i += 1) {
-      const current = DEPTH_COLOR_STOPS[i];
-      const next = DEPTH_COLOR_STOPS[i + 1];
-      if (t >= current.position && t <= next.position) {
-        left = current;
-        right = next;
-        break;
-      }
-    }
-
-    const span = right.position - left.position || 1;
-    const localT = (t - left.position) / span;
-    const r = Math.round(left.rgb[0] + (right.rgb[0] - left.rgb[0]) * localT);
-    const g = Math.round(left.rgb[1] + (right.rgb[1] - left.rgb[1]) * localT);
-    const b = Math.round(left.rgb[2] + (right.rgb[2] - left.rgb[2]) * localT);
     return rgbToHex(r, g, b);
   }
 
@@ -655,15 +750,25 @@
       state.visitHistory.length = MAX_LOG_ITEMS;
     }
 
-    renderVisitLog();
+    // Defer DOM update to next frame
+    if (!state.renderLogPending) {
+      state.renderLogPending = true;
+      requestAnimationFrame(() => {
+        renderVisitLog();
+        state.renderLogPending = false;
+      });
+    }
   }
 
   function renderVisitLog() {
     const list = controls.visitLog;
     if (!list) return;
-    list.innerHTML = "";
+    
+    // Use DocumentFragment for batch DOM operations
+    const fragment = document.createDocumentFragment();
 
-    state.visitHistory.forEach((entry) => {
+    for (let i = 0; i < state.visitHistory.length; i++) {
+      const entry = state.visitHistory[i];
       const li = document.createElement("li");
       const anchor = document.createElement("a");
       anchor.href = entry.url;
@@ -677,8 +782,11 @@
       meta.textContent = `step ${entry.step} • visits ${entry.visits}`;
       li.appendChild(meta);
 
-      list.appendChild(li);
-    });
+      fragment.appendChild(li);
+    }
+    
+    list.innerHTML = "";
+    list.appendChild(fragment);
   }
 
   function updateUI() {
@@ -688,13 +796,15 @@
     controls.currentPage.textContent = currentNode ? currentNode.title : "–";
     controls.maxDistance.textContent = String(state.maxFiniteDepth ?? 0);
 
+    // Count link types in a single pass
     let walkLinks = 0;
     let similarityLinks = 0;
-    for (const link of state.links) {
+    for (let i = 0; i < state.links.length; i++) {
+      const link = state.links[i];
       if (link.type === "walk") {
-        walkLinks += 1;
+        walkLinks++;
       } else if (link.type === "similarity") {
-        similarityLinks += 1;
+        similarityLinks++;
       }
     }
     controls.walkLinkCount.textContent = String(walkLinks);
@@ -703,6 +813,7 @@
     controls.pauseBtn.disabled = !state.currentTitle;
     controls.resetBtn.disabled = !state.currentTitle && !state.nodes.length;
     controls.stepBtn.disabled = state.running || !state.currentTitle;
+    controls.reorganiseBtn.disabled = !state.nodes.length;
     controls.pauseBtn.textContent = state.running ? "Pause" : "Resume";
     controls.startBtn.textContent = state.currentTitle ? "Restart" : "Start";
 
@@ -751,8 +862,17 @@
   }
 
   function jaccard(setA, setB) {
-    const intersectionSize = [...setA].filter((item) => setB.has(item)).length;
-    const unionSize = new Set([...setA, ...setB]).size;
+    let intersectionSize = 0;
+    const smallerSet = setA.size < setB.size ? setA : setB;
+    const largerSet = setA.size < setB.size ? setB : setA;
+    
+    for (const item of smallerSet) {
+      if (largerSet.has(item)) {
+        intersectionSize++;
+      }
+    }
+    
+    const unionSize = setA.size + setB.size - intersectionSize;
     if (!unionSize) return 0;
     return intersectionSize / unionSize;
   }
@@ -898,7 +1018,16 @@
         .select(this.container)
         .append("svg")
         .attr("width", this.width)
-        .attr("height", this.height);
+        .attr("height", this.height)
+        .on("click", () => {
+          // Clear selection when clicking background
+          if (state.selectedNode) {
+            state.selectedNode = null;
+            state.pathToSeed.clear();
+            setFeedback("Selection cleared.", "success");
+            this.update(state.nodes, state.links);
+          }
+        });
 
       this.inner = this.svg.append("g").attr("class", "graph-inner");
       this.linkGroup = this.inner.append("g").attr("class", "links");
@@ -915,9 +1044,11 @@
             .distance((d) => this.linkDistance(d))
             .strength((d) => this.linkStrength(d))
         )
-        .force("charge", d3.forceManyBody().strength(-220))
+        .force("charge", d3.forceManyBody().strength(-800))
         .force("center", d3.forceCenter(this.width / 2, this.height / 2))
-        .force("collision", d3.forceCollide().radius((d) => this.nodeRadius(d) + 6).strength(0.75));
+        .force("collision", d3.forceCollide().radius((d) => this.nodeRadius(d) + 16).strength(0.9))
+        .alphaDecay(0.03)
+        .velocityDecay(0.4);
 
       const zoom = d3
         .zoom()
@@ -934,6 +1065,7 @@
       this.nodes = nodes;
       this.links = links;
 
+      // Optimize link updates
       this.linkSelection = this.linkGroup.selectAll("line").data(links, (d) => this.linkKey(d));
       this.linkSelection.exit().remove();
       const linkEnter = this.linkSelection
@@ -942,10 +1074,16 @@
         .attr("class", (d) => `link ${d.type}`);
 
       this.linkSelection = linkEnter.merge(this.linkSelection);
+      
+      // Cache path check state to avoid repeated calls
+      const hasPathHighlight = state.selectedNode && state.pathToSeed.size > 0;
+      
       this.linkSelection
         .attr("class", (d) => `link ${d.type}`)
+        .classed("path-highlight", hasPathHighlight ? (d) => this.isLinkOnPath(d) : false)
         .attr("stroke-width", (d) => this.linkStrokeWidth(d));
 
+      // Optimize node updates
       this.nodeSelection = this.nodeGroup.selectAll("g").data(nodes, (d) => d.id);
       this.nodeSelection.exit().remove();
 
@@ -953,7 +1091,8 @@
         .enter()
         .append("g")
         .attr("class", "node")
-        .call(this.dragBehaviour());
+        .call(this.dragBehaviour())
+        .on("click", (event, d) => handleNodeClick(event, d));
 
       nodeEnter
         .append("circle")
@@ -967,6 +1106,7 @@
       this.nodeSelection.select("circle")
         .attr("r", (d) => this.nodeRadius(d))
         .classed("revisited", (d) => d.visitCount > 1)
+        .classed("path-highlight", hasPathHighlight ? (d) => state.pathToSeed.has(d.id) : false)
         .attr("fill", (d) => nodeColor(d));
 
       this.nodeSelection.select("title").text((d) => this.nodeTooltip(d));
@@ -991,16 +1131,82 @@
 
       this.simulation.force(
         "collision",
-        d3.forceCollide().radius((d) => this.nodeRadius(d) + 6).strength(0.75)
+        d3.forceCollide().radius((d) => this.nodeRadius(d) + 16).strength(0.9)
       );
 
+      // Ensure tick handler is set
       this.simulation.on("tick", () => this.ticked());
-      this.simulation.alpha(0.6).restart();
+
+      // Only restart if simulation has stopped or is very low energy
+      if (this.simulation.alpha() < 0.001) {
+        this.simulation.alpha(0.3).restart();
+      } else {
+        // Just reheat slightly if already running
+        this.simulation.alpha(Math.min(this.simulation.alpha() + 0.1, 0.3));
+      }
     }
 
     reset() {
       this.update([], []);
       this.simulation.alpha(0).stop();
+    }
+
+    reorganise() {
+      // Clear all fixed positions
+      for (let i = 0; i < this.nodes.length; i++) {
+        const node = this.nodes[i];
+        node.fx = null;
+        node.fy = null;
+      }
+
+      // Place seed node at center
+      const centerX = this.width / 2;
+      const centerY = this.height / 2;
+
+      if (state.seedId) {
+        const seedNode = this.nodes.find(n => n.id === state.seedId);
+        if (seedNode) {
+          seedNode.x = centerX;
+          seedNode.y = centerY;
+          seedNode.vx = 0;
+          seedNode.vy = 0;
+        }
+      }
+
+      // Position nodes in concentric circles based on depth
+      const nodesByDepth = new Map();
+      for (let i = 0; i < this.nodes.length; i++) {
+        const node = this.nodes[i];
+        if (node.id === state.seedId) continue;
+        
+        const depth = Number.isFinite(node.depth) ? node.depth : Infinity;
+        if (!nodesByDepth.has(depth)) {
+          nodesByDepth.set(depth, []);
+        }
+        nodesByDepth.get(depth).push(node);
+      }
+
+      // Sort depths and arrange nodes in rings
+      const depths = Array.from(nodesByDepth.keys()).sort((a, b) => a - b);
+      const baseRadius = Math.min(this.width, this.height) * 0.15;
+
+      for (let d = 0; d < depths.length; d++) {
+        const depth = depths[d];
+        const nodesAtDepth = nodesByDepth.get(depth);
+        const radius = baseRadius * (1 + depth * 0.8);
+        
+        for (let i = 0; i < nodesAtDepth.length; i++) {
+          const node = nodesAtDepth[i];
+          const angle = (i / nodesAtDepth.length) * 2 * Math.PI;
+          node.x = centerX + radius * Math.cos(angle);
+          node.y = centerY + radius * Math.sin(angle);
+          node.vx = 0;
+          node.vy = 0;
+        }
+      }
+
+      // Full restart with high energy
+      this.simulation.alpha(1).restart();
     }
 
     ticked() {
@@ -1054,6 +1260,18 @@
       return base * (state.nodeScale || 1) * multiplier;
     }
 
+    isLinkOnPath(link) {
+      if (!state.selectedNode || state.pathToSeed.size === 0) {
+        return false;
+      }
+      
+      const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+      const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+      
+      // Check if both endpoints are on the path
+      return state.pathToSeed.has(sourceId) && state.pathToSeed.has(targetId);
+    }
+
     nodeTooltip(node) {
       const snippet = node.summary.length > 220 ? `${node.summary.slice(0, 217)}…` : node.summary;
       const depthText = Number.isFinite(node.depth) ? node.depth : "–";
@@ -1069,10 +1287,10 @@
 
     linkDistance(link) {
       if (link.type === "walk") {
-        return Math.max(60, 160 / Math.sqrt(link.weight || 1));
+        return Math.max(120, 320 / Math.sqrt(link.weight || 1));
       }
       const similarity = link.weight || 0;
-      return 220 - similarity * 160;
+      return 440 - similarity * 320;
     }
 
     linkStrength(link) {

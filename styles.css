@@ -70,6 +70,26 @@ input[type="number"] {
   color: #cbd5f5;
 }
 
+.color-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.color-row input[type="color"] {
+  width: 48px;
+  height: 32px;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: transparent;
+  cursor: pointer;
+}
+
+.color-row span {
+  color: #cbd5f5;
+  font-size: 0.9rem;
+}
+
 input[type="text"]:focus,
 input[type="number"]:focus {
   outline: 2px solid rgba(59, 130, 246, 0.6);
@@ -102,6 +122,16 @@ button:hover:not(:disabled) {
 button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+.reorganise-btn {
+  width: 100%;
+  margin-top: 0.75rem;
+  background: rgba(139, 92, 246, 0.25);
+}
+
+.reorganise-btn:hover:not(:disabled) {
+  background: rgba(139, 92, 246, 0.45);
 }
 
 .status {
@@ -214,6 +244,17 @@ svg {
 
 .nodes circle.revisited {
   stroke-width: 2px;
+}
+
+.nodes circle.path-highlight {
+  filter: drop-shadow(0 0 8px #fbbf24) drop-shadow(0 0 16px #fbbf24);
+}
+
+.links line.path-highlight {
+  stroke: #fbbf24 !important;
+  stroke-width: 2.5px !important;
+  filter: drop-shadow(0 0 6px #fbbf24);
+  stroke-dasharray: none !important;
 }
 
 .labels text {
