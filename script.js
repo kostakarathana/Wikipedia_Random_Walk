@@ -3,11 +3,19 @@
   const REST_SUMMARY_BASE = "https://en.wikipedia.org/api/rest_v1/page/summary/";
   const MAX_LOG_ITEMS = 50;
   const SIMILARITY_NEIGHBORS = 3;
-  const DEPTH_COLOR_STOPS = [
-    { position: 0, rgb: [255, 255, 255] },
-    { position: 0.6, rgb: [185, 28, 28] },
-    { position: 1, rgb: [0, 0, 0] }
-  ];
+  
+  const COLOR_GRADIENTS = {
+    red: [
+      { position: 0, rgb: [255, 255, 255] },
+      { position: 0.6, rgb: [185, 28, 28] },
+      { position: 1, rgb: [0, 0, 0] }
+    ],
+    blue: [
+      { position: 0, rgb: [255, 255, 255] },
+      { position: 0.6, rgb: [37, 99, 235] },
+      { position: 1, rgb: [0, 0, 0] }
+    ]
+  };
 
   const state = {
     nodes: [],
@@ -19,9 +27,11 @@
     adjacency: new Map(),
     seedId: null,
     maxFiniteDepth: 0,
-    nodeScale: 1,
+    nodeScale: 5,
+    branchingMultiplier: 1,
     selectedNode: null,
     pathToSeed: new Set(),
+    colorGradient: 'red',
     running: false,
     loopPromise: null,
     stepCount: 0,
@@ -43,6 +53,7 @@
     cacheControls();
     graph = new ForceGraph("#graph");
     attachEvents();
+    updateBranchingDisplay();
     updateUI();
   });
 
@@ -51,7 +62,7 @@
     controls.startInput = document.getElementById("start-title");
     controls.startBtn = document.getElementById("start-btn");
     controls.pauseBtn = document.getElementById("pause-btn");
-    controls.stepBtn = document.getElementById("step-btn");
+    controls.colorBtn = document.getElementById("color-btn");
     controls.resetBtn = document.getElementById("reset-btn");
     controls.stepCount = document.getElementById("step-count");
     controls.uniqueCount = document.getElementById("unique-count");
@@ -63,9 +74,13 @@
     controls.visitLog = document.getElementById("visit-log");
     controls.nodeScale = document.getElementById("node-scale");
     controls.nodeScaleDisplay = document.getElementById("node-scale-display");
+    controls.branchingMultiplier = document.getElementById("branching-multiplier");
+    controls.branchingDisplay = document.getElementById("branching-display");
+    controls.experimentalWarning = document.getElementById("experimental-warning");
     controls.infoBtn = document.getElementById("info-btn");
     controls.infoDialog = document.getElementById("info-dialog");
     controls.reorganiseBtn = document.getElementById("reorganise-btn");
+    controls.homeBtn = document.getElementById("home-btn");
   }
 
   function attachEvents() {
@@ -112,8 +127,12 @@
       }
     });
 
-    controls.stepBtn.addEventListener("click", async () => {
-      await performStep(true);
+    controls.colorBtn.addEventListener("click", () => {
+      state.colorGradient = state.colorGradient === 'red' ? 'blue' : 'red';
+      setFeedback(`Color changed to ${state.colorGradient}.`, "success");
+      if (graph) {
+        graph.updateVisuals();
+      }
     });
 
     controls.resetBtn.addEventListener("click", () => {
@@ -131,8 +150,23 @@
       }
     });
 
+    controls.branchingMultiplier?.addEventListener("input", (event) => {
+      const value = Number.parseInt(event.target.value, 10);
+      if (!Number.isFinite(value) || value < 1 || value > 50) return;
+      state.branchingMultiplier = value;
+      updateBranchingDisplay();
+      updateExperimentalWarning();
+    });
+
     controls.reorganiseBtn?.addEventListener("click", () => {
       reorganiseGraph();
+    });
+
+    controls.homeBtn?.addEventListener("click", () => {
+      if (graph) {
+        graph.resetView();
+        setFeedback("View reset to seed node.", "success");
+      }
     });
   }
 
@@ -282,7 +316,15 @@
   async function stepLoop() {
     try {
       while (state.running) {
-        await performStep();
+        // Perform multiple steps based on branching multiplier
+        const branchCount = state.branchingMultiplier;
+        
+        if (branchCount === 1) {
+          await performStep();
+        } else {
+          // Branch from the current node
+          await performMultipleBranches(branchCount);
+        }
       }
     } finally {
       state.loopPromise = null;
@@ -326,6 +368,86 @@
     } finally {
       state.inFlight = false;
       updateUI();
+    }
+  }
+
+  async function performMultipleBranches(branchCount) {
+    if (state.inFlight) return;
+    state.inFlight = true;
+
+    try {
+      if (!state.currentTitle) {
+        throw new Error("No active page. Start a walk first.");
+      }
+
+      // Get links from current page
+      const availability = await ensureLinksAvailable();
+      if (!availability) {
+        setFeedback("No further links available after backtracking. Walk paused.");
+        stopRunning();
+        return;
+      }
+
+      if (availability.backtracked) {
+        setFeedback(
+          `Backtracked to ${prettifyTitle(availability.fromTitle)}; continuing walk.`,
+          "success"
+        );
+      }
+
+      // Pick multiple random links (as many as requested or available)
+      const availableLinks = availability.links;
+      const actualBranchCount = Math.min(branchCount, availableLinks.length);
+      
+      // Shuffle and take the first N links
+      const shuffled = [...availableLinks].sort(() => Math.random() - 0.5);
+      const selectedLinks = shuffled.slice(0, actualBranchCount);
+
+      // Visit all selected pages in parallel
+      const branches = selectedLinks.map((link) => {
+        state.stepCount += 1;
+        return visitPage(link, state.stepCount);
+      });
+      
+      await Promise.all(branches);
+
+      // After all branches complete, pick one randomly as the new current
+      const newCurrent = selectedLinks[Math.floor(Math.random() * selectedLinks.length)];
+      state.currentTitle = newCurrent;
+      state.previousTitle = state.walkStack[state.walkStack.length - 2];
+      
+      // Update the walk stack to include the chosen path
+      if (!state.walkStack.includes(newCurrent)) {
+        state.walkStack.push(newCurrent);
+      }
+
+    } catch (error) {
+      console.error(error);
+      setFeedback(error.message || "Step failed.");
+      stopRunning();
+    } finally {
+      state.inFlight = false;
+      updateUI();
+    }
+  }
+
+  async function performStepFromNode(nodeId) {
+    try {
+      const node = state.nodeIndex.get(nodeId);
+      if (!node) return;
+
+      // Get links for this specific node
+      const links = await fetchLinks(node.title);
+      if (!links || links.length === 0) return;
+
+      // Pick random link (excluding parent if we're on the main walk stack)
+      const previousTitle = state.walkStack[state.walkStack.length - 2];
+      const nextTitle = pickRandomLink(links, previousTitle);
+      
+      state.stepCount += 1;
+      await visitPage(nextTitle, state.stepCount);
+    } catch (error) {
+      console.error("Branch step failed:", error);
     }
   }
 
@@ -406,7 +528,7 @@
     }
 
     if (graph) {
-      graph.update(state.nodes, state.links);
+      graph.updateVisuals();
     }
   }
 
@@ -704,25 +826,28 @@
   }
 
   function interpolateGradientColor(t) {
-    // White -> Red -> Black gradient
-    const white = [255, 255, 255];
-    const red = [185, 28, 28];
-    const black = [0, 0, 0];
-
-    let r, g, b;
-    if (t <= 0.6) {
-      // Interpolate from white to red
-      const localT = t / 0.6;
-      r = Math.round(white[0] + (red[0] - white[0]) * localT);
-      g = Math.round(white[1] + (red[1] - white[1]) * localT);
-      b = Math.round(white[2] + (red[2] - white[2]) * localT);
-    } else {
-      // Interpolate from red to black
-      const localT = (t - 0.6) / 0.4;
-      r = Math.round(red[0] + (black[0] - red[0]) * localT);
-      g = Math.round(red[1] + (black[1] - red[1]) * localT);
-      b = Math.round(red[2] + (black[2] - red[2]) * localT);
+    const gradient = COLOR_GRADIENTS[state.colorGradient];
+    
+    // Find the two color stops to interpolate between
+    let lowerStop = gradient[0];
+    let upperStop = gradient[gradient.length - 1];
+    
+    for (let i = 0; i < gradient.length - 1; i++) {
+      if (t >= gradient[i].position && t <= gradient[i + 1].position) {
+        lowerStop = gradient[i];
+        upperStop = gradient[i + 1];
+        break;
+      }
     }
+    
+    // Calculate local t between the two stops
+    const range = upperStop.position - lowerStop.position;
+    const localT = range > 0 ? (t - lowerStop.position) / range : 0;
+    
+    // Interpolate RGB values
+    const r = Math.round(lowerStop.rgb[0] + (upperStop.rgb[0] - lowerStop.rgb[0]) * localT);
+    const g = Math.round(lowerStop.rgb[1] + (upperStop.rgb[1] - lowerStop.rgb[1]) * localT);
+    const b = Math.round(lowerStop.rgb[2] + (upperStop.rgb[2] - lowerStop.rgb[2]) * localT);
 
     return rgbToHex(r, g, b);
   }
@@ -812,8 +937,8 @@
 
     controls.pauseBtn.disabled = !state.currentTitle;
     controls.resetBtn.disabled = !state.currentTitle && !state.nodes.length;
-    controls.stepBtn.disabled = state.running || !state.currentTitle;
-    controls.reorganiseBtn.disabled = !state.nodes.length;
+    controls.colorBtn.disabled = !state.nodes.length;
+    controls.reorganiseBtn.disabled = state.running || !state.nodes.length;
     controls.pauseBtn.textContent = state.running ? "Pause" : "Resume";
     controls.startBtn.textContent = state.currentTitle ? "Restart" : "Start";
 
@@ -825,6 +950,22 @@
     controls.nodeScale.value = String(state.nodeScale);
     const display = state.nodeScale % 1 === 0 ? state.nodeScale.toFixed(0) : state.nodeScale.toFixed(1);
     controls.nodeScaleDisplay.textContent = `${display.replace(/\.0$/, "")}×`;
+  }
+
+  function updateBranchingDisplay() {
+    if (!controls.branchingDisplay || !controls.branchingMultiplier) return;
+    controls.branchingMultiplier.value = String(state.branchingMultiplier);
+    controls.branchingDisplay.textContent = `${state.branchingMultiplier}×`;
+  }
+
+  function updateExperimentalWarning() {
+    if (!controls.experimentalWarning) return;
+    // Show warning when branching multiplier is above 15
+    if (state.branchingMultiplier > 15) {
+      controls.experimentalWarning.style.display = "block";
+    } else {
+      controls.experimentalWarning.style.display = "none";
+    }
   }
 
   function setFeedback(message, tone) {
@@ -1044,20 +1185,26 @@
             .distance((d) => this.linkDistance(d))
             .strength((d) => this.linkStrength(d))
         )
-        .force("charge", d3.forceManyBody().strength(-800))
+        .force("charge", d3.forceManyBody().strength(-1600))
         .force("center", d3.forceCenter(this.width / 2, this.height / 2))
-        .force("collision", d3.forceCollide().radius((d) => this.nodeRadius(d) + 16).strength(0.9))
+        .force("collision", d3.forceCollide().radius((d) => this.nodeRadius(d) + 32).strength(0.9))
+        .force("radial", null) // Placeholder for radial constraint
         .alphaDecay(0.03)
         .velocityDecay(0.4);
 
+      this.currentZoomLevel = 1; // Track zoom level
+
       const zoom = d3
         .zoom()
-        .scaleExtent([0.05, 6])
+        .scaleExtent([0.01, 10])
         .on("zoom", (event) => {
           this.inner.attr("transform", event.transform);
+          this.currentZoomLevel = event.transform.k;
+          this.updateLabelVisibility();
         });
 
       this.svg.call(zoom).on("dblclick.zoom", null);
+      this.zoom = zoom; // Store zoom behavior for reset
       window.addEventListener("resize", () => this.handleResize());
     }
 
@@ -1091,7 +1238,6 @@
         .enter()
         .append("g")
         .attr("class", "node")
-        .call(this.dragBehaviour())
         .on("click", (event, d) => handleNodeClick(event, d));
 
       nodeEnter
@@ -1118,9 +1264,15 @@
         .enter()
         .append("text")
         .attr("dy", "-1em")
+        .attr("font-size", "26px")
         .text((d) => d.title);
 
-      this.labelSelection = labelEnter.merge(this.labelSelection).text((d) => d.title);
+      this.labelSelection = labelEnter.merge(this.labelSelection)
+        .attr("font-size", "26px")
+        .text((d) => d.title);
+      
+      // Update label visibility based on zoom level
+      this.updateLabelVisibility();
 
       this.simulation.nodes(nodes);
       this.simulation
@@ -1138,12 +1290,50 @@
       this.simulation.on("tick", () => this.ticked());
 
       // Only restart if simulation has stopped or is very low energy
+      // For large graphs, use lower alpha to settle faster
+      const targetAlpha = this.nodes.length > 500 ? 0.15 : 0.3;
+      
       if (this.simulation.alpha() < 0.001) {
-        this.simulation.alpha(0.3).restart();
+        this.simulation.alpha(targetAlpha).restart();
       } else {
         // Just reheat slightly if already running
-        this.simulation.alpha(Math.min(this.simulation.alpha() + 0.1, 0.3));
+        this.simulation.alpha(Math.min(this.simulation.alpha() + 0.05, targetAlpha));
       }
+      
+      // For very large graphs, stop the simulation after it settles
+      if (this.nodes.length > 300) {
+        setTimeout(() => {
+          if (this.simulation.alpha() < 0.05) {
+            this.simulation.alpha(0).stop();
+          }
+        }, 3000);
+      }
+    }
+
+    updateVisuals() {
+      // Update visual attributes only, without restarting physics
+      const hasPathHighlight = state.selectedNode && state.pathToSeed.size > 0;
+      
+      // Update link visuals
+      if (this.linkSelection) {
+        this.linkSelection
+          .classed("path-highlight", hasPathHighlight ? (d) => this.isLinkOnPath(d) : false);
+      }
+      
+      // Update node visuals
+      if (this.nodeSelection) {
+        this.nodeSelection.select("circle")
+          .classed("path-highlight", hasPathHighlight ? (d) => state.pathToSeed.has(d.id) : false)
+          .attr("fill", (d) => nodeColor(d));
+      }
+    }
+
+    updateLabelVisibility() {
+      if (!this.labelSelection) return;
+      
+      // Show labels when zoomed in beyond 0.17x (very zoomed out - 3x less restrictive than before)
+      const showLabels = this.currentZoomLevel >= 0.17;
+      this.labelSelection.style("display", showLabels ? null : "none");
     }
 
     reset() {
@@ -1173,7 +1363,7 @@
         }
       }
 
-      // Position nodes in concentric circles based on depth
+      // Group nodes by depth
       const nodesByDepth = new Map();
       for (let i = 0; i < this.nodes.length; i++) {
         const node = this.nodes[i];
@@ -1186,32 +1376,131 @@
         nodesByDepth.get(depth).push(node);
       }
 
-      // Sort depths and arrange nodes in rings
+      // Calculate target radii for each depth
       const depths = Array.from(nodesByDepth.keys()).sort((a, b) => a - b);
       const baseRadius = Math.min(this.width, this.height) * 0.15;
+      const targetRadii = new Map();
 
       for (let d = 0; d < depths.length; d++) {
         const depth = depths[d];
-        const nodesAtDepth = nodesByDepth.get(depth);
-        const radius = baseRadius * (1 + depth * 0.8);
-        
-        for (let i = 0; i < nodesAtDepth.length; i++) {
-          const node = nodesAtDepth[i];
-          const angle = (i / nodesAtDepth.length) * 2 * Math.PI;
-          node.x = centerX + radius * Math.cos(angle);
-          node.y = centerY + radius * Math.sin(angle);
-          node.vx = 0;
-          node.vy = 0;
+        targetRadii.set(depth, baseRadius * (1 + depth * 0.8));
+      }
+
+      // Store target radius on each node
+      for (let i = 0; i < this.nodes.length; i++) {
+        const node = this.nodes[i];
+        if (node.id === state.seedId) {
+          node.targetRadius = 0;
+        } else {
+          const depth = Number.isFinite(node.depth) ? node.depth : Infinity;
+          node.targetRadius = targetRadii.get(depth) || baseRadius * 10;
         }
       }
 
+      // Initial angular placement - cluster by connectivity
+      for (let d = 0; d < depths.length; d++) {
+        const depth = depths[d];
+        const nodesAtDepth = nodesByDepth.get(depth);
+        const radius = targetRadii.get(depth);
+        
+        // Group nodes by their primary parent (most common connection at depth-1)
+        const nodeGroups = this.clusterByParent(nodesAtDepth);
+        
+        let angleOffset = 0;
+        for (const group of nodeGroups) {
+          const angleSpan = (group.length / nodesAtDepth.length) * 2 * Math.PI;
+          
+          for (let i = 0; i < group.length; i++) {
+            const node = group[i];
+            const angle = angleOffset + (i / group.length) * angleSpan;
+            node.x = centerX + radius * Math.cos(angle);
+            node.y = centerY + radius * Math.sin(angle);
+            node.vx = 0;
+            node.vy = 0;
+          }
+          
+          angleOffset += angleSpan;
+        }
+      }
+
+      // Apply radial constraint force
+      const radialForce = d3.forceRadial()
+        .radius((d) => d.targetRadius || 0)
+        .x(centerX)
+        .y(centerY)
+        .strength(0.8);
+
+      this.simulation.force("radial", radialForce);
+
       // Full restart with high energy
-      this.simulation.alpha(1).restart();
+      this.simulation.alpha(1).alphaTarget(0).restart();
+
+      // Remove radial force after settling and stop simulation completely
+      setTimeout(() => {
+        this.simulation.force("radial", null);
+        this.simulation.alpha(0).stop();
+        // Force a final tick to update label positions
+        this.ticked();
+      }, 5000);
+    }
+
+    clusterByParent(nodes) {
+      // Group nodes by which node at previous depth they connect to most
+      const groups = new Map();
+      
+      for (const node of nodes) {
+        let bestParent = null;
+        let maxConnections = 0;
+        
+        // Find the parent node (at depth-1) with most connections to this node
+        const neighbors = state.adjacency.get(node.id) || new Set();
+        for (const neighborId of neighbors) {
+          const neighbor = state.nodeIndex.get(neighborId);
+          if (neighbor && neighbor.depth === node.depth - 1) {
+            const connectionCount = 1; // Could weight by link weight here
+            if (connectionCount > maxConnections) {
+              maxConnections = connectionCount;
+              bestParent = neighborId;
+            }
+          }
+        }
+        
+        const groupKey = bestParent || 'orphan';
+        if (!groups.has(groupKey)) {
+          groups.set(groupKey, []);
+        }
+        groups.get(groupKey).push(node);
+      }
+      
+      return Array.from(groups.values());
+    }
+
+    resetView() {
+      // Reset zoom to identity (scale 1, no translation)
+      this.svg.transition()
+        .duration(750)
+        .call(this.zoom.transform, d3.zoomIdentity);
+
+      // Center on seed node if it exists
+      if (state.seedId) {
+        const seedNode = this.nodes.find(n => n.id === state.seedId);
+        if (seedNode) {
+          const transform = d3.zoomIdentity
+            .translate(this.width / 2, this.height / 2)
+            .scale(1)
+            .translate(-seedNode.x, -seedNode.y);
+          
+          this.svg.transition()
+            .duration(750)
+            .call(this.zoom.transform, transform);
+        }
+      }
     }
 
     ticked() {
       if (!this.nodeSelection || !this.linkSelection) return;
 
+      // Batch DOM updates for better performance
       this.linkSelection
         .attr("x1", (d) => d.source.x)
         .attr("y1", (d) => d.source.y)
@@ -1220,9 +1509,12 @@
 
       this.nodeSelection.attr("transform", (d) => `translate(${d.x}, ${d.y})`);
 
-      this.labelSelection
-        .attr("x", (d) => d.x)
-        .attr("y", (d) => d.y - (this.nodeRadius(d) + 6));
+      // Always update labels if they exist (removed zoom check since labels need to be positioned even when hidden)
+      if (this.labelSelection) {
+        this.labelSelection
+          .attr("x", (d) => d.x)
+          .attr("y", (d) => d.y - (this.nodeRadius(d) + 6));
+      }
     }
 
     dragBehaviour() {
@@ -1287,10 +1579,10 @@
 
     linkDistance(link) {
       if (link.type === "walk") {
-        return Math.max(120, 320 / Math.sqrt(link.weight || 1));
+        return Math.max(240, 640 / Math.sqrt(link.weight || 1));
       }
       const similarity = link.weight || 0;
-      return 440 - similarity * 320;
+      return 880 - similarity * 640;
     }
 
     linkStrength(link) {

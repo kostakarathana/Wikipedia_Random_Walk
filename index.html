@@ -26,16 +26,22 @@
         <input type="text" id="start-title" name="start" placeholder="e.g. Alan Turing" required />
         <label for="node-scale">Node Size Multiplier</label>
         <div class="range-row">
-          <input type="range" id="node-scale" name="node-scale" min="1" max="10" step="0.5" value="1" />
-          <output id="node-scale-display" for="node-scale">1×</output>
+          <input type="range" id="node-scale" name="node-scale" min="1" max="10" step="0.5" value="5" />
+          <output id="node-scale-display" for="node-scale">5×</output>
         </div>
+        <label for="branching-multiplier">Branching Multiplier</label>
+        <div class="range-row">
+          <input type="range" id="branching-multiplier" name="branching-multiplier" min="1" max="50" step="1" value="1" />
+          <output id="branching-display" for="branching-multiplier">1×</output>
+        </div>
+        <div id="experimental-warning" class="experimental-warning" style="display: none;">⚠️ EXPERIMENTAL!</div>
         <div class="button-row">
           <button type="submit" id="start-btn">Start</button>
           <button type="button" id="pause-btn" disabled>Pause</button>
-          <button type="button" id="step-btn" disabled>Step</button>
+          <button type="button" id="color-btn" disabled>Change Color</button>
           <button type="button" id="reset-btn" disabled>Reset</button>
         </div>
-        <button type="button" id="reorganise-btn" class="reorganise-btn" disabled>Reorganise</button>
+        <button type="button" id="reorganise-btn" class="reorganise-btn" disabled>Beautify - Must Be Paused</button>
       </form>
       <section class="status">
         <div class="stat"><span class="label">Steps</span><span id="step-count">0</span></div>
@@ -60,6 +66,7 @@
       </section>
     </aside>
     <main class="visualisation">
+      <button type="button" id="home-btn" class="home-button" aria-label="Reset view to seed node">⌂</button>
       <div id="graph"></div>
     </main>
   </div>
